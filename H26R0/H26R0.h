@@ -137,6 +137,7 @@ extern void MX_USART6_UART_Init(void);
 #define CODE_H26R0_SAMPLE_KGRAM           2607
 #define CODE_H26R0_SAMPLE_OUNCE           2608
 #define CODE_H26R0_SAMPLE_POUND           2609
+#define CODE_H26R0_ZEROCAL                2610
  
 
 	
