@@ -423,7 +423,7 @@ float weightCalculation(void)
 */
 int SendResults(float message, uint8_t Mode, uint8_t Unit, uint8_t Port, uint8_t Module, float *Buffer)
 {
-	float Raw_Msg=0.0f;
+	int Raw_Msg=0;
   int8_t *pcOutputString;
   static const int8_t *pcWeightMsg = ( int8_t * ) "Weight (%s): %.2f\r\n";
 	static const int8_t *pcWeightVerboseMsg = ( int8_t * ) "%.2f\r\n";
@@ -495,8 +495,9 @@ int SendResults(float message, uint8_t Mode, uint8_t Unit, uint8_t Port, uint8_t
 					writePxITMutex(Port, (char *)&Raw_Msg, sizeof(Raw_Msg), 10);
 			}
 			else{
+				//Raw_Msg=999999;
 					messageParams[0]=Port;
-					memcpy(&messageParams[1], &Raw_Msg, sizeof(float));
+					memcpy(&messageParams[1], &Raw_Msg, sizeof(int));
 					SendMessageToModule(Module, CODE_port_forward, sizeof(float)+1);
 			}
       break;
