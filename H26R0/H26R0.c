@@ -32,10 +32,12 @@ UART_HandleTypeDef huart5;
 UART_HandleTypeDef huart6;
 
 /* Module exported parameters ------------------------------------------------*/
-float h26r0_weight1 = 0.0f;
-float h26r0_weight2 = 0.0f;
-module_param_t modParam[NUM_MODULE_PARAMS] = {{.paramPtr=&h26r0_weight1, .paramFormat=FMT_FLOAT, .paramName="weight1"} ,
-{.paramPtr=&h26r0_weight2, .paramFormat=FMT_FLOAT, .paramName="weight2"}};
+float H26R0_Weight1 = 0.0f;
+float H26R0_Weight2 = 0.0f;
+uint8_t H26R0_DATA_FORMAT = FMT_UINT32;
+module_param_t modParam[NUM_MODULE_PARAMS] = {{.paramPtr=&H26R0_Weight1, .paramFormat=FMT_FLOAT, .paramName="weight1"} ,
+{.paramPtr=&H26R0_Weight2, .paramFormat=FMT_FLOAT, .paramName="weight2"},
+{.paramPtr=&H26R0_DATA_FORMAT, .paramFormat=FMT_UINT8, .paramName="format"}};
 
 /* Private variables ---------------------------------------------------------*/
 /* Define HX711 pins */
@@ -60,6 +62,7 @@ module_param_t modParam[NUM_MODULE_PARAMS] = {{.paramPtr=&h26r0_weight1, .paramF
 #define SAMPLE_BUFFER_CASE       8
 #define SAMPLE_CLI_VERBOSE_CASE  9
 #define IDLE_CASE                0
+#define RAW                      5
 
 /*Define private variables*/
 uint8_t pulses=0, rate=0, gain=128;
@@ -93,6 +96,7 @@ void LoadcellTask(void * argument);
 void TimerTask(void * argument);
 static void CheckForEnterKey(void);
 static void HandleTimeout(TimerHandle_t xTimer);
+int StreamRawToPort(uint8_t Ch, uint8_t Port, uint8_t Module, uint32_t Period, uint32_t Timeout);
 
 /* Create CLI commands --------------------------------------------------------*/
 static portBASE_TYPE demoCommand( int8_t *pcWriteBuffer, size_t xWriteBufferLen, const int8_t *pcCommandString );
@@ -105,6 +109,7 @@ static portBASE_TYPE calibrationCommand( int8_t *pcWriteBuffer, size_t xWriteBuf
 static portBASE_TYPE zerocalCommand( int8_t *pcWriteBuffer, size_t xWriteBufferLen, const int8_t *pcCommandString );
 static portBASE_TYPE weight1ModParamCommand( int8_t *pcWriteBuffer, size_t xWriteBufferLen, const int8_t *pcCommandString );
 static portBASE_TYPE weight2ModParamCommand( int8_t *pcWriteBuffer, size_t xWriteBufferLen, const int8_t *pcCommandString );
+static portBASE_TYPE formatModParamCommand( int8_t *pcWriteBuffer, size_t xWriteBufferLen, const int8_t *pcCommandString );
 
 /* CLI command structure : demo */
 const CLI_Command_Definition_t demoCommandDefinition =
@@ -146,7 +151,7 @@ const CLI_Command_Definition_t stopCommandDefinition =
 const CLI_Command_Definition_t unitCommandDefinition =
 {
   ( const int8_t * ) "unit", /* The command string to type. */
-  ( const int8_t * ) "(H26R0) unit:\r\n Set the measurement unit (g, kg, ounce, lb)\r\n\r\n",
+  ( const int8_t * ) "(H26R0) unit:\r\n Set the measurement unit (g, kg, ounce, lb or raw)\r\n\r\n",
   unitCommand, /* The function to run. */
   1 /* one parameter is expected. */
 };
@@ -197,6 +202,16 @@ const CLI_Command_Definition_t weight2CommandDefinition =
 		( const int8_t * ) "(H26R0) weight2:\r\nDisplay the value of module parameter: channel_2's weight\r\n\r\n",
   weight2ModParamCommand, /* The function to run. */
   0 /* No parameters are expected. */
+};
+
+/*-----------------------------------------------------------*/
+/* CLI command structure : weight */
+const CLI_Command_Definition_t dataformatCommandDefinition =
+{
+  ( const int8_t * ) "format", /* The command string to type. */
+		( const int8_t * ) "(H26R0) format:\r\nSelect Data format for sending\r\n\r\n",
+  formatModParamCommand, /* The function to run. */
+  1 /* No parameters are expected. */
 };
 
 /* -----------------------------------------------------------------------
@@ -342,6 +357,8 @@ void RegisterModuleCLICommands(void)
 	FreeRTOS_CLIRegisterCommand( &zerocalCommandDefinition);
 	FreeRTOS_CLIRegisterCommand( &weight1CommandDefinition);
 	FreeRTOS_CLIRegisterCommand( &weight2CommandDefinition);
+	FreeRTOS_CLIRegisterCommand( &dataformatCommandDefinition);
+	
 }
 
 /*-----------------------------------------------------------*/
@@ -424,7 +441,17 @@ float weightCalculation(void)
 */
 int SendResults(float message, uint8_t Mode, uint8_t Unit, uint8_t Port, uint8_t Module, float *Buffer)
 {
+<<<<<<<
 	int Raw_Msg=0;
+=======
+	#if H26R0_DATA_FORMAT==FMT_UINT8
+	uint32_t Raw_Msg=0;
+	message*=10;
+	#endif
+	#if H26R0_DATA_FORMAT!=FMT_UINT8
+	float Raw_Msg=0;
+	#endif
+>>>>>>>
   int8_t *pcOutputString;
   static const int8_t *pcWeightMsg = ( int8_t * ) "Weight (%s): %.2f\r\n";
 	static const int8_t *pcWeightVerboseMsg = ( int8_t * ) "%.2f\r\n";
@@ -440,6 +467,8 @@ int SendResults(float message, uint8_t Mode, uint8_t Unit, uint8_t Port, uint8_t
 			Raw_Msg=message*Kg2Ounce_ratio; break;
 		case Pound:
 			Raw_Msg=message*Kg2Pound_ratio; break;
+		case RAW:
+			Raw_Msg=Average(global_ch, 1);
 		default:
 			Raw_Msg=message; break;
 	}
@@ -845,6 +874,30 @@ int StreamKGramToVERBOSE(uint8_t Ch, uint32_t Period, uint32_t Timeout)
 	global_period=Period;
 	global_timeout=Timeout;
 	mode=STREAM_CLI_VERBOSE_CASE;
+	if ((global_timeout > 0) && (global_timeout < 0xFFFFFFFF))
+  {
+	  /* start software timer which will create event timeout */
+		/* Create a timeout timer */
+		xTimer = xTimerCreate( "Measurement Timeout", pdMS_TO_TICKS(global_timeout), pdFALSE, ( void * ) TIMERID_TIMEOUT_MEASUREMENT, HandleTimeout );
+		/* Start the timeout timer */
+		xTimerStart( xTimer, portMAX_DELAY );
+	}
+	if (global_timeout > 0)
+	{
+		startMeasurementRanging = START_MEASUREMENT_RANGING;
+	}
+	return (H26R0_OK);
+}
+
+/* --- stream raw value from channel ch to Port
+*/
+int StreamRawToPort(uint8_t Ch, uint8_t Port, uint8_t Module, uint32_t Period, uint32_t Timeout)
+{
+	global_ch=Ch;
+	global_period=Period;
+	global_timeout=Timeout;
+	mode=STREAM_PORT_CASE;
+	unit=RAW;
 	if ((global_timeout > 0) && (global_timeout < 0xFFFFFFFF))
   {
 	  /* start software timer which will create event timeout */
@@ -1338,6 +1391,11 @@ static portBASE_TYPE unitCommand( int8_t *pcWriteBuffer, size_t xWriteBufferLen,
     unit = Pound;
     strcpy( ( char * ) pcWriteBuffer, ( char * ) "Used measurement unit: Pound\r\n" );
   }
+	else if (!strncmp((const char *)pcParameterString1, "raw", 3))
+  {
+    unit = RAW;
+    strcpy( ( char * ) pcWriteBuffer, ( char * ) "Used measurement unit: Raw\r\n" );
+  }
   else
   {
     result = H26R0_ERR_WrongParams;
@@ -1530,5 +1588,39 @@ static portBASE_TYPE weight2ModParamCommand( int8_t *pcWriteBuffer, size_t xWrit
 
 /*-----------------------------------------------------------*/
 
+static portBASE_TYPE formatModParamCommand( int8_t *pcWriteBuffer, size_t xWriteBufferLen, const int8_t *pcCommandString )
+{	
+	//Module_Status result = H26R0_OK;
+  int8_t *pcParameterString1;
+  portBASE_TYPE xParameterStringLength1 = 0;
+  static const int8_t *pcMessageWrongParam = ( int8_t * ) "Wrong parameter!\r\n";
+
+  /* Remove compile time warnings about unused parameters, and check the
+  write buffer is not NULL.  NOTE - for simplicity, this example assumes the
+  write buffer length is adequate, so does not check for buffer overflows. */
+  ( void ) xWriteBufferLen;
+  configASSERT( pcWriteBuffer );
+
+  /* 1st parameter for naming of uart port: P1 to P6 */
+  pcParameterString1 = ( int8_t * ) FreeRTOS_CLIGetParameter (pcCommandString, 1, &xParameterStringLength1);
+  if (!strncmp((const char *)pcParameterString1, "0", 1))
+  {
+    H26R0_DATA_FORMAT = FMT_UINT8;      
+    strcpy( ( char * ) pcWriteBuffer, ( char * ) "Used data format: uint\r\n" );
+  }
+  else if (!strncmp((const char *)pcParameterString1, "1", 1))
+  {
+    H26R0_DATA_FORMAT = FMT_FLOAT;        
+    strcpy( ( char * ) pcWriteBuffer, ( char * ) "Used data format: float\r\n" );
+  }
+	else
+	{
+		strcpy( ( char * ) pcWriteBuffer, ( char * ) pcMessageWrongParam );
+	}
+	SetHX711Rate(rate);
+	return pdFALSE;	
+}
+
+/*-----------------------------------------------------------*/
 
 /************************ (C) COPYRIGHT HEXABITZ *****END OF FILE****/
