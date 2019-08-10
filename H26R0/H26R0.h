@@ -140,6 +140,7 @@ extern void MX_USART6_UART_Init(void);
 #define CODE_H26R0_ZEROCAL                2610
 #define CODE_H26R0_STREAM_RAW             2611
 #define CODE_H26R0_SAMPLE_RAW             2612
+#define CODE_H26R0_STREAM_FORMAT          2613
  
 
 	
